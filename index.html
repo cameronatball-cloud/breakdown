@@ -291,7 +291,7 @@ function defState() {
     e1rmEst: { squat: false, bench: false, trap: true, chin: true },
     hist: { squat: [{ d, v: 120 }], bench: [{ d, v: 104 }], trap: [], chin: [] },
     tests: {}, bw: [], sessions: [], active: null, last: {}, swaps: {}, checkins: [],
-    liftLog: {}, lastHist: {}, best: {}, rest: {}, notes: {}
+    liftLog: {}, lastHist: {}, best: {}, restAdj: {}, notes: {}
   };
 }
 function hydrate(o) {
@@ -300,7 +300,8 @@ function hydrate(o) {
     e1rmEst: { ...d.e1rmEst, ...(o.e1rmEst || {}) }, hist: { ...d.hist, ...(o.hist || {}) } };
 }
 let S;
-try { const raw = localStorage.getItem(KEY); if (raw) { const o = JSON.parse(raw); if (o && o.v === 1) S = hydrate(o); } } catch (e) {}
+const dropOld = o => { delete o.rest; return o; };
+try { const raw = localStorage.getItem(KEY); if (raw) { const o = JSON.parse(raw); if (o && o.v === 1) S = hydrate(dropOld(o)); } } catch (e) {}
 if (!S) S = defState();
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Could not save on this phone. Storage may be full.'); } }
 const ui = { tab: 'today', view: S.active ? 'session' : 'tabs', pick: null, feel: 'normal', sheet: null, timer: null, sw: null, bwDraft: null, dayType: null, pSid: 'D1', pWeek: null };
@@ -345,6 +346,13 @@ function scheme(lift, w) {
     return b === 'b' ? [[4, 6, .70]] : b === 's' ? [[1, 3, .85, 'top'], [3, 5, .75]] : [[1, 2, .90, 'top'], [4, 3, .65, 'spd']];
   }
   return MAIN[w];
+}
+// Rest by aim. Heavy, low-rep sets need the longest for strength to come back; moderate sets
+// for size need less; fast speed sets need just enough to stay fast. Your own adjustment is added on top.
+function mainRest(tag, p) {
+  if (tag === 'test' || tag === 'top' || tag === 'con') return 240;
+  if (tag === 'spd') return 120;
+  return p >= .85 ? 210 : p >= .75 ? 180 : 150;
 }
 const LIFTS = {
   squat: { name: 'Back squat', eq: 'bb', inc: 5, rest: 210, alts: ['Safety bar squat', 'Hack squat'], con: 'Contrast: after each back-off set, rest 4 min, then 3 box jumps.' },
@@ -544,10 +552,10 @@ function buildMain(def, ctx) {
   let sets = [], note = '';
   if (sch.test) {
     const r = sch.test;
-    sets = [{ w: ld(r === 5 ? .84 : .9), r, tag: 'test' }];
+    sets = [{ w: ld(r === 5 ? .84 : .9), r, tag: 'test', p: r === 5 ? .84 : .9 }];
     note = `Work up in 3 or 4 jumps to a ${r}-rep set at about RPE ${r === 5 ? 8 : 9}. Log that set and the app resets your max from it.`;
   } else {
-    for (const [n, r, p, tag] of sch) for (let i = 0; i < n; i++) sets.push({ w: ld(p), r, tag: tag || 'work' });
+    for (const [n, r, p, tag] of sch) for (let i = 0; i < n; i++) sets.push({ w: ld(p), r, tag: tag || 'work', p });
     if (sch.some(x => x[3] === 'con') && Lf.con) note = Lf.con;
     if (sch.some(x => x[3] === 'spd')) note = 'Back-off sets: move the bar as fast as you can.';
   }
@@ -556,8 +564,10 @@ function buildMain(def, ctx) {
     sets = top.length ? [...top, ...rest.slice(0, 2)] : rest.slice(0, 3);
   }
   if (S.e1rmEst[lift] && !sch.test) note = (note ? note + ' ' : '') + 'Loads are estimates until your week 1 test.';
-  const sw = S.swaps[lift], rk = 'main|' + lift, rest = S.rest[rk] ?? Lf.rest;
-  return { k: 'main', g: def.g, id: lift, lift, name: sw || Lf.name, base: Lf.name, alts: [{ n: Lf.name }, ...normAlts(Lf.alts)], eq: Lf.eq, inc: Lf.inc, rest, baseRest: Lf.rest, rk, tuned: rest !== Lf.rest, note, effort: 'solid', unit: 'reps', sets: sets.map(s => ({ ...s, tr: s.r, done: false })) };
+  const sw = S.swaps[lift], rk = 'main|' + lift, adj = S.restAdj[rk] || 0;
+  sets.forEach(x => { x.baseRest = mainRest(x.tag, x.p); x.rest = x.baseRest + adj; });
+  const rest = sets[sets.length - 1].rest, baseRest = sets[sets.length - 1].baseRest;
+  return { k: 'main', g: def.g, id: lift, lift, name: sw || Lf.name, base: Lf.name, alts: [{ n: Lf.name }, ...normAlts(Lf.alts)], eq: Lf.eq, inc: Lf.inc, rest, baseRest, rk, tuned: adj !== 0, note, effort: 'solid', unit: 'reps', sets: sets.map(s => ({ ...s, tr: s.r, done: false })) };
 }
 function build(def, ctx) {
   const blk = ctx.blk;
@@ -572,8 +582,8 @@ function build(def, ctx) {
   if (def.k === 'rep') {
     let n = def.all ?? def.sets[blk]; if (ctx.dl) n = Math.ceil(n / 2);
     const label = typeof def.label === 'string' ? def.label : def.label[blk];
-    const rk = 'rep|' + def.id, rest = S.rest[rk] ?? def.rest;
-    return { k: 'rep', g: def.g, id: def.id, name: def.name, note: def.note || '', rest, baseRest: def.rest, rk, tuned: rest !== def.rest, label, sets: Array.from({ length: n }, () => ({ done: false })) };
+    const rk = 'rep|' + def.id, adj = Math.max(0, S.restAdj[rk] || 0), rest = def.rest + adj;
+    return { k: 'rep', g: def.g, id: def.id, name: def.name, note: def.note || '', rest, baseRest: def.rest, rk, tuned: adj !== 0, label, sets: Array.from({ length: n }, () => ({ done: false })) };
   }
   if (def.k === 'main') return buildMain(def, ctx);
   const base = def.names ? def.names[blk] : def.name;
@@ -588,12 +598,17 @@ function build(def, ctx) {
   let w = null, r = lo;
   if (def.k === 'power') { w = hasW ? (L ? L.w : st) : null; r = lo; }
   else { const sg = suggest(L, lo, hi, def.inc || 2.5, hasW ? st : null, unit); w = hasW ? sg.w : null; r = sg.r; }
-  const baseRest = def.rest ?? 90, rest = baseRest ? (S.rest[key] ?? baseRest) : 0;
-  return { k: def.k, g: def.g, id: def.id, key, name, base, alts: def.alts ? [{ n: base }, ...alts] : [], eq, unit, each: !!def.each, lo, hi, inc: def.inc || 2.5, rest, baseRest, rk: key, tuned: rest !== baseRest, note: def.note || '', effort: 'solid', sets: Array.from({ length: n }, () => ({ w, r, tr: r, done: false })) };
+  const baseRest = def.rest ? def.rest + (def.k === 'acc' && lo <= 6 ? 30 : 0) : (def.rest ?? 90), adj = S.restAdj[key] || 0, rest = baseRest ? baseRest + adj : 0;
+  return { k: def.k, g: def.g, id: def.id, key, name, base, alts: def.alts ? [{ n: base }, ...alts] : [], eq, unit, each: !!def.each, lo, hi, inc: def.inc || 2.5, rest, baseRest, rk: key, tuned: !!(baseRest && adj), note: def.note || '', effort: 'solid', sets: Array.from({ length: n }, () => ({ w, r, tr: r, done: false })) };
 }
 function materialize(sid, feel, wk) {
   const ctx = ctxFor(sid, feel, wk);
-  return SESS[sid].items(ctx).filter(Boolean).map(d => build(d, ctx)).filter(Boolean);
+  const items = SESS[sid].items(ctx).filter(Boolean).map(d => build(d, ctx)).filter(Boolean);
+  // A superset rests on its last exercise, so it takes the heavier aim of the pair.
+  const groups = {};
+  items.forEach(it => { if (it.g && it.g.length > 1) (groups[it.g[0]] = groups[it.g[0]] || []).push(it); });
+  Object.values(groups).forEach(g => { if (g.length < 2 || !g.some(it => it.k === 'acc' && it.lo <= 6)) return; g.forEach(it => { if (it.rest > 0 && !(it.k === 'acc' && it.lo <= 6)) { it.baseRest += 30; it.rest += 30; } }); });
+  return items;
 }
 
 /* ---------- describing work ---------- */
@@ -605,11 +620,16 @@ function wtxt(eq, w) {
   return `${fmtW(w)} kg`;
 }
 const unitWord = it => it.unit === 's' ? ' s' : it.unit === 'm' ? ' m' : '';
+function mainRestTxt(it) {
+  const top = it.sets.find(s => s.tag === 'top'), other = it.sets.filter(s => s.tag !== 'top');
+  if (top && other.length && top.rest !== other[0].rest) return `rest ${fmtRest(top.rest)} after the top set, ${fmtRest(other[0].rest)} after the rest`;
+  return restTxt(it.sets[0].rest);
+}
 function presc(it) {
   if (it.k === 'main') {
     const parts = []; let cur = null;
     for (const s of it.sets) { const k = s.tag + '|' + s.w + '|' + s.tr; if (cur && cur.k === k) cur.n++; else { cur = { k, n: 1, s }; parts.push(cur); } }
-    return parts.map(p => p.s.tag === 'test' ? `Test: ${p.s.tr}-rep set, start around ${wtxt(it.eq, p.s.w)}` : `${p.s.tag === 'top' ? 'Top set ' : ''}${p.n} × ${p.s.tr} @ ${wtxt(it.eq, p.s.w)}`).join(', then ') + ` · ${restTxt(it.rest)}${it.tuned ? ', tuned to you' : ''}`;
+    return parts.map(p => p.s.tag === 'test' ? `Test: ${p.s.tr}-rep set, start around ${wtxt(it.eq, p.s.w)}` : `${p.s.tag === 'top' ? 'Top set ' : ''}${p.n} × ${p.s.tr} @ ${wtxt(it.eq, p.s.w)}`).join(', then ') + ` · ${mainRestTxt(it)}${it.tuned ? ', tuned to you' : ''}`;
   }
   if (it.k === 'rep') return `${it.sets.length} × ${it.label} · ${restTxt(it.rest)}${it.tuned ? ', tuned to you' : ''}`;
   const n = it.sets.length, rng = it.lo === it.hi ? it.lo : it.lo + '–' + it.hi;
@@ -764,7 +784,7 @@ function report() {
     L.push(`- ${s.d} ${SESS[s.sid] ? SESS[s.sid].short : s.sid}, week ${s.w}, ${Math.round((s.end - s.start) / 60000)} min, felt ${s.feel}${s.tags && s.tags.length ? ', ' + s.tags.join('/') : ''}${s.note ? ', note: ' + s.note : ''}. ${its.join('; ')}`);
   });
   L.push('Coach flags: ' + (coach().map(c => c.t).join('; ') || 'none') + '.');
-  const tuned = Object.entries(S.rest); if (tuned.length) L.push('Rests tuned: ' + tuned.map(([k, v]) => `${k.split('|')[1]} ${fmtRest(v)}`).join('; ') + '.');
+  const tuned = Object.entries(S.restAdj).filter(([, v]) => v); if (tuned.length) L.push('Rest adjustments: ' + tuned.map(([k, v]) => `${k.split('|')[1]} ${v > 0 ? '+' : ''}${v} s`).join('; ') + '.');
   const notes = Object.entries(S.notes); if (notes.length) L.push('Exercise notes: ' + notes.map(([k, v]) => `${k}: ${v}`).join('; ') + '.');
   return L.join('\n');
 }
@@ -1097,12 +1117,13 @@ function tuneRest(it, st, ch) {
   else if ((it.restPlus || 0) >= 2 || (solo && took != null && took > cur + 90 && !dropped)) { nv = cur + 30; why = 'You kept needing longer than the timer'; }
   else if (allHit && ((it.restSkip || 0) >= 2 || (solo && took != null && took < cur - 30))) { nv = cur - 15; why = 'You recovered faster than the timer and hit every rep'; }
   nv = Math.round(Math.min(cap, Math.max(floor, nv)) / 15) * 15;
-  if (nv !== cur) { st.rest[it.rk] = nv; ch.push({ t: `${it.name} rest`, v: `${fmtRest(cur)} → ${fmtRest(nv)}`, why }); }
+  if (it.k === 'rep' && nv < base) nv = cur;
+  if (nv !== cur) { st.restAdj[it.rk] = nv - base; ch.push({ t: `${it.name} rest`, v: `${fmtRest(cur)} → ${fmtRest(nv)}`, why }); }
 }
 function applySession(A, st) {
   const ch = [], bw = st.bw.length ? [...st.bw].sort((a, b) => a.d < b.d ? -1 : 1).pop().kg : 84, d = today();
   const pushTest = (k, v) => { (st.tests[k] = st.tests[k] || []).push({ d, v }); ch.push({ t: TESTS[k].name, v: fmtTest(k, v) + (TESTS[k].unit === 'time' || TESTS[k].unit === 's' ? '' : ' ' + TESTS[k].unit) }); };
-  st.liftLog = st.liftLog || {}; st.lastHist = st.lastHist || {}; st.best = st.best || {}; st.rest = st.rest || {};
+  st.liftLog = st.liftLog || {}; st.lastHist = st.lastHist || {}; st.best = st.best || {}; st.restAdj = st.restAdj || {};
   const bestCheck = (k, done, add, name) => {
     const prev = st.best[k]; let top = null;
     done.forEach(s => { if (s.w == null || !s.r) return; const sc = (s.w + add) * (1 + s.r / 30); if (!top || sc > top.sc) top = { w: s.w, r: s.r, sc, d }; });
@@ -1276,7 +1297,7 @@ function renderProgram() {
   <li>Accessories use a rep range. Hit the top of the range on every set and the weight goes up next time.</li>
   <li>Rough day: back-off sets cut to 2, finisher dropped. Cut in this order when life gets busy: Size days, finishers, back-off sets, accessories. Never the top set or the jumps.</li>
   <li>Something hurts? Tap the exercise name to swap it. Three sessions of pain in a row means see a physio.</li>
-  <li>Rest periods start from the research: 3 to 4 min on heavy lifts, 2 to 2.5 min on big accessories, 75 to 90 s on isolation and supersets. Then they tune to you. Reps drop on later sets and the rest grows by 30 s. You keep cutting the timer short and still hit every rep, and it shrinks by 15 s.</li>
+  <li>Rest is set by the aim of each set. Top sets, tests and contrast sets get 4 min. Heavy back-off sets get 3.5 min, moderate ones 3 min, and recovery-week sets 2.5 min. Speed sets get 2 min, big accessories 2 to 2.5 min, and isolation 75 to 90 s. Sprints get full walk-back recovery, and fitness intervals use fixed work-to-rest ratios. Then your own adjustment is added: +30 s if your reps drop on later sets, −15 s if you keep starting early and still hit every rep. Sprint rests only ever grow.</li>
   <li>Size A and Size B are proper upper sessions at a lower intensity: leave 2 reps in the tank on presses and rows, 1 on isolation. Mostly the Laid look, with neck, grip and shoulder-health work for the pitch.</li></ul></section>
   <section class="card"><div class="eyebrow">Fuel</div><ul class="rules"><li>Training days about 3,500 kcal, rest days about 3,100. Protein 180 g every day.</li><li>Creatine 5 g daily. Caffeine 200 to 300 mg before Day 1, Day 2 and Field B, never after 2 pm.</li><li>Vitamin D 2,000 IU from October to March. Sleep 8 hours.</li><li>The weekly check-in on the Today tab adjusts calories from your bodyweight trend.</li></ul></section>`;
 }
@@ -1349,7 +1370,7 @@ const ACT = {
   minimize() { ui.view = 'tabs'; ui.tab = 'today'; ui.lastKey = null; render(); },
   tick(o) {
     const it = S.active.items[o.i], s = it.sets[o.j]; s.done = !s.done;
-    if (s.done) { s.at = Date.now(); if (it.rest > 0) startRest(it.rest, it.g && it.g.length > 1 ? nextInGroup(o.i) : nextLabel(o.i), o.i); else toast('Now: ' + nextInGroup(o.i)); } else delete s.at;
+    if (s.done) { s.at = Date.now(); const rs = s.rest ?? it.rest; if (rs > 0) startRest(rs, it.g && it.g.length > 1 ? nextInGroup(o.i) : nextLabel(o.i), o.i); else toast('Now: ' + nextInGroup(o.i)); } else delete s.at;
     save(); render();
   },
   toggle(o) { const it = S.active.items[o.i]; if (it.k === 'test' && !it.done && !it.edited && latest(it.key) == null) { ACT.editv(o); return; } it.done = !it.done; if (it.done && it.k === 'test') it.edited = true; save(); render(); },
