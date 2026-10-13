@@ -250,7 +250,8 @@ details.hist ul{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--mut
    Breakdown: back row program + session tracker
    Data lives in localStorage on this device only.
    ========================================================= */
-const KEY = 'breakdown:v1';
+const KEY = 'breakdown:v2';
+try { localStorage.removeItem('breakdown:v1'); } catch (e) {}
 const $ = s => document.querySelector(s);
 const z2 = n => String(n).padStart(2, '0');
 const dstr = d => d.getFullYear() + '-' + z2(d.getMonth() + 1) + '-' + z2(d.getDate());
@@ -285,18 +286,18 @@ const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="no
 function defState() {
   const d = today();
   return {
-    v: 1,
+    v: 1, onboarded: false,
     settings: { mode: 'off', week: 1, cycle: 1, bar: 20, trapBar: 25, sound: true, adjLift: 0, adjRest: 0 },
-    e1rm: { squat: 120, bench: 104, trap: 160, chin: 115 },
+    e1rm: { squat: 120, bench: 105, trap: 160, chin: 115 },
     e1rmEst: { squat: false, bench: false, trap: true, chin: true },
-    hist: { squat: [{ d, v: 120 }], bench: [{ d, v: 104 }], trap: [], chin: [] },
+    hist: { squat: [{ d, v: 120 }], bench: [{ d, v: 105 }], trap: [], chin: [] },
     tests: {}, bw: [], sessions: [], active: null, last: {}, swaps: {}, checkins: [],
     liftLog: {}, lastHist: {}, best: {}, restAdj: {}, notes: {}
   };
 }
 function hydrate(o) {
   const d = defState();
-  return { ...d, ...o, settings: { ...d.settings, ...(o.settings || {}) }, e1rm: { ...d.e1rm, ...(o.e1rm || {}) },
+  return { ...d, ...o, onboarded: o.onboarded ?? true, settings: { ...d.settings, ...(o.settings || {}) }, e1rm: { ...d.e1rm, ...(o.e1rm || {}) },
     e1rmEst: { ...d.e1rmEst, ...(o.e1rmEst || {}) }, hist: { ...d.hist, ...(o.hist || {}) } };
 }
 let S;
@@ -310,8 +311,8 @@ const ui = { tab: 'today', view: S.active ? 'session' : 'tabs', pick: null, feel
 const TESTS = {
   cmj:    { name: 'Countermovement jump', unit: 'cm', step: 1, big: 5, def: 40, up: true, goal: 45, goalTxt: '45–50 cm', note: 'Best of 3, hands on hips. Film in slow motion with the My Jump app.' },
   broad:  { name: 'Standing broad jump', unit: 'cm', step: 1, big: 10, def: 230, up: true, goal: 250, goalTxt: '250 cm', note: 'Two feet, measure to the back of the heels. Best of 3.' },
-  peakw:  { name: 'Bike 10 s peak watts', unit: 'W', step: 10, big: 50, def: 800, up: true, goal: 1000, goalTxt: '1,000 W', note: 'Best peak watts from three 10-second sprints.' },
-  bike3:  { name: 'Bike 3 min max calories', unit: 'cal', step: 1, big: 5, def: 60, up: true, goal: 80, goalTxt: '80 cal', note: 'All-out for 3 minutes on the Echo or assault bike.' },
+  peakw:  { name: 'Assault bike 10 s peak watts', unit: 'W', step: 10, big: 50, def: 800, up: true, goal: 1000, goalTxt: '1,000 W', note: 'Best peak watts from three 10-second sprints.' },
+  bike3:  { name: 'Assault bike 3 min max calories', unit: 'cal', step: 1, big: 5, def: 60, up: true, goal: 80, goalTxt: '80 cal', note: 'All-out for 3 minutes on the assault bike.' },
   ski2k:  { name: '2 km ski erg', unit: 'time', step: 1, big: 10, def: 470, up: false, goal: 435, goalTxt: 'under 7:15', note: 'Damper 5 to 7. All-out but evenly paced.' },
   s10:    { name: '10 m sprint', unit: 's', step: .01, big: .1, def: 1.85, up: false, goal: 1.75, goalTxt: 'under 1.75 s', note: 'Best of 3, 3 min between. Timing app or a mate with a stopwatch.' },
   s40:    { name: '40 m sprint', unit: 's', step: .01, big: .1, def: 5.6, up: false, goal: 5.3, goalTxt: 'under 5.30 s', note: 'Best of 3, 3 min between.' },
@@ -373,9 +374,9 @@ const WARM_LOWER = WARM_GYM + ' Add pogo hops, 2 × 15.';
 
 function bikeSprints(ctx, n) {
   const pw = latest('peakw');
-  return { name: 'Bike sprints', desc: `${n} × 10 s all-out, 50 s easy. Standing start each rep.`, target: 'Keep every rep within 10% of your best' + (pw ? ` (${Math.round(pw * .9)} W or more)` : ' peak watts'), plan: { rounds: n, segs: [['All-out', 10, 'w'], ['Easy', 50, 'r']] } };
+  return { name: 'Assault bike sprints', desc: `${n} × 10 s all-out, 50 s easy. Standing start each rep.`, target: 'Keep every rep within 10% of your best' + (pw ? ` (${Math.round(pw * .9)} W or more)` : ' peak watts'), plan: { rounds: n, segs: [['All-out', 10, 'w'], ['Easy', 50, 'r']] } };
 }
-const easy = (name, min) => ({ name, desc: `${min} min easy. You should be able to talk in sentences.`, plan: { segs: [['Easy', min * 60, 'r']] } });
+const easy = (nm, min) => ({ name: nm.replace('Easy bike', 'Easy assault bike'), desc: `${min} min easy. You should be able to talk in sentences.`, plan: { segs: [['Easy', min * 60, 'r']] } });
 function skiZ2() { const p = skiPace(); return p ? `${fmtPace(p + 18)} to ${fmtPace(p + 25)} per 500 m` : 'Easy, conversational. Your paces appear after the 2 km ski test.'; }
 function ski30() { const p = skiPace(); return p ? `Hard reps at ${fmtPace(p - 6)} to ${fmtPace(p - 4)} per 500 m` : 'Hard reps at a pace you can hold for every rep'; }
 
@@ -390,7 +391,7 @@ function d1(ctx) {
     A('E2', 'pallof', 'Pallof press', { eq: 'cable', each: true, all: [3, 10, 10], start: 15, rest: 90 }),
     A('F1', 'nordic', 'Nordic hamstring curl', { sets: ctx.ins ? { b: [2, 5, 5], s: [2, 5, 5], p: [2, 5, 5] } : { b: [3, 3, 4], s: [3, 5, 6], p: [2, 4, 5] }, rest: 0, note: 'Lower as slowly as you can, push back up with your hands. Use a band in the Build block if you need it.' }),
     NECK('F2'),
-    C(c => c.dl ? easy('Easy bike', 10) : c.tw ? { name: 'Bike 10 s peak watts test', desc: '3 × 10 s all-out from a standing start, 2 min easy between. Log your best peak watts.', plan: { rounds: 3, segs: [['All-out', 10, 'w'], ['Easy', 120, 'r']] }, metric: 'peakw' } : bikeSprints(c, c.ins ? 6 : { b: 6, s: 8, p: 10 }[c.blk]))];
+    C(c => c.dl ? easy('Easy bike', 10) : c.tw ? { name: 'Assault bike 10 s peak watts test', desc: '3 × 10 s all-out from a standing start, 2 min easy between. Log your best peak watts.', plan: { rounds: 3, segs: [['All-out', 10, 'w'], ['Easy', 120, 'r']] }, metric: 'peakw' } : bikeSprints(c, c.ins ? 6 : { b: 6, s: 8, p: 10 }[c.blk]))];
 }
 function d2(ctx) {
   return [W(WARM_GYM),
@@ -402,7 +403,7 @@ function d2(ctx) {
     A('E2', 'latc', 'Cable lateral raise', { eq: 'cable', all: [3, 12, 15], start: 7.5, inc: 1.25, rest: 90 }),
     A('F1', 'facepull', 'Face pull', { eq: 'cable', all: [3, 12, 15], start: 20, rest: 0, alts: [{ n: 'Band external rotation', eq: 'bw' }] }),
     NECK('F2'),
-    C(c => c.dl ? easy('Easy bike', 10) : c.tw ? { name: 'Bike 3 min max calories test', desc: '3 minutes all-out. Log your total calories. This sets every bike target in the app.', plan: { segs: [['Max calories', 180, 'w']] }, metric: 'bike3' } : (() => { const [n, ev] = { b: [8, 75], s: [10, 75], p: [10, 60] }[c.blk]; return { name: 'Bike 10 × 10 calories', desc: `${n} × 10 calories, one starting every ${fmtT(ev)}. Every rep under 30 s.`, target: 'The hard one. Hold your rep time steady.', plan: { rounds: n, segs: [['10 cal, go', 30, 'w'], ['Rest', ev - 30, 'r']] } }; })())];
+    C(c => c.dl ? easy('Easy bike', 10) : c.tw ? { name: 'Assault bike 3 min max calories test', desc: '3 minutes all-out. Log your total calories. This sets every bike target in the app.', plan: { segs: [['Max calories', 180, 'w']] }, metric: 'bike3' } : (() => { const [n, ev] = { b: [8, 75], s: [10, 75], p: [10, 60] }[c.blk]; return { name: 'Assault bike 10 × 10 calories', desc: `${n} × 10 calories, one starting every ${fmtT(ev)}. Every rep under 30 s.`, target: 'The hard one. Hold your rep time steady.', plan: { rounds: n, segs: [['10 cal, go', 30, 'w'], ['Rest', ev - 30, 'r']] } }; })())];
 }
 function d3(ctx) {
   const p = ctx.blk === 'p';
@@ -431,7 +432,7 @@ function d4(ctx) {
     A('E2', 'incurl', 'Incline DB curl', { eq: 'db', all: [3, 10, 12], start: 12, inc: 2, rest: 75 }),
     A('F1', 'hammer', 'Hammer curl', { eq: 'db', all: [2, 10, 12], start: 16, inc: 2, rest: 0 }),
     A('F2', 'crunch', 'Cable crunch', { eq: 'cable', all: [3, 12, 15], start: 40, rest: 75, alts: [{ n: 'Ab wheel', eq: 'bw' }] }),
-    C(c => c.dl ? easy('Easy bike', 10) : c.tw ? { name: '2 km ski erg test', desc: 'All-out but evenly paced. Damper 5 to 7. Log your time. This sets every ski pace in the app.', metric: 'ski2k' } : (() => { const n = { b: 5, s: 6, p: 7 }[c.blk], Rt = bikeRate(), p = skiPace(); return { name: 'Bike and ski, alternating minutes', desc: `${n} rounds: minute 1 bike, minute 2 ski, minute 3 rest. Finish each block in 35 to 45 s.`, target: [Rt ? `Bike ${Math.round(Rt * .7)} cal` : '', p ? `Ski at ${fmtPace(p + 5)} per 500 m` : ''].filter(Boolean).join(' · ') || 'Moderate, not a sprint. Targets appear after your tests.', plan: { rounds: n, segs: [[Rt ? `Bike ${Math.round(Rt * .7)} cal` : 'Bike', 60, 'w'], ['Ski', 60, 'w'], ['Rest', 60, 'r']] } }; })())];
+    C(c => c.dl ? easy('Easy bike', 10) : c.tw ? { name: '2 km ski erg test', desc: 'All-out but evenly paced. Damper 5 to 7. Log your time. This sets every ski pace in the app.', metric: 'ski2k' } : (() => { const n = { b: 5, s: 6, p: 7 }[c.blk], Rt = bikeRate(), p = skiPace(); return { name: 'Assault bike and ski erg, alternating minutes', desc: `${n} rounds: minute 1 bike, minute 2 ski, minute 3 rest. Finish each block in 35 to 45 s.`, target: [Rt ? `Bike ${Math.round(Rt * .7)} cal` : '', p ? `Ski at ${fmtPace(p + 5)} per 500 m` : ''].filter(Boolean).join(' · ') || 'Moderate, not a sprint. Targets appear after your tests.', plan: { rounds: n, segs: [[Rt ? `Bike ${Math.round(Rt * .7)} cal` : 'Bike', 60, 'w'], ['Ski', 60, 'w'], ['Rest', 60, 'r']] } }; })())];
 }
 function fa(ctx) {
   return [W('400 m easy jog. 2 × 20 m each of A-skips, B-skips, high knees, butt kicks and carioca. Then 3 build-ups over 40 m at 60, 75 and 90%.'),
@@ -462,13 +463,13 @@ function en(ctx) {
   const ski250 = R('Y', 'ski250', 'Ski erg 250 m', { all: 6, label: '250 m hard', rest: 45 });
   const it = [W('8 min easy bike, then 3 × 6 s bike accelerations.')];
   if (isTW(w)) it.push(C(() => easy('Easy bike', 20)));
-  else if (w === 2 || w === 3) { const n = w === 2 ? 4 : 5; it.push(C(() => ({ name: 'Aerobic power', desc: `${n} × 4 min hard, 3 min easy. Alternate bike and ski each rep.`, target: four, plan: { rounds: n, segs: [['Hard', 240, 'w'], ['Easy', 180, 'r']] } }))); it.push(carry); }
+  else if (w === 2 || w === 3) { const n = w === 2 ? 4 : 5; it.push(C(() => ({ name: 'Assault bike and ski erg, 4-min reps', desc: `${n} × 4 min hard, 3 min easy. Alternate bike and ski each rep.`, target: four, plan: { rounds: n, segs: [['Hard', 240, 'w'], ['Easy', 180, 'r']] } }))); it.push(carry); }
   else if (isDL(w)) it.push(C(() => easy('Easy bike or ski', 30)));
-  else if (w === 5 || w === 6) { const n = w === 5 ? 2 : 3; it.push(C(() => ({ name: '15/15 bike intervals', desc: `15 s hard, 15 s easy for 6 min. ${n} sets, 3 min between.`, target: Rt ? `About ${Math.round(Rt * .3)} cal per 15 s` : 'Hard but repeatable', plan: { sets: n, rounds: 12, segs: [['Hard', 15, 'w'], ['Easy', 15, 'r']], setRest: 180 } }))); it.push(R('Y', 'ski500', 'Ski erg 500 m', { all: w === 5 ? 3 : 4, label: p ? `500 m at ${fmtPace(p - 3)}` : '500 m hard', rest: 120 })); }
-  else if (w === 7) { it.push(C(() => ({ name: 'Bike 4 × 4 min', desc: '4 × 4 min hard, 3 min easy.', target: four, plan: { rounds: 4, segs: [['Hard', 240, 'w'], ['Easy', 180, 'r']] } }))); it.push(ski250); }
+  else if (w === 5 || w === 6) { const n = w === 5 ? 2 : 3; it.push(C(() => ({ name: 'Assault bike 15/15s', desc: `15 s hard, 15 s easy for 6 min. ${n} sets, 3 min between.`, target: Rt ? `About ${Math.round(Rt * .3)} cal per 15 s` : 'Hard but repeatable', plan: { sets: n, rounds: 12, segs: [['Hard', 15, 'w'], ['Easy', 15, 'r']], setRest: 180 } }))); it.push(R('Y', 'ski500', 'Ski erg 500 m', { all: w === 5 ? 3 : 4, label: p ? `500 m at ${fmtPace(p - 3)}` : '500 m hard', rest: 120 })); }
+  else if (w === 7) { it.push(C(() => ({ name: 'Assault bike 4 × 4 min', desc: '4 × 4 min hard, 3 min easy.', target: four, plan: { rounds: 4, segs: [['Hard', 240, 'w'], ['Easy', 180, 'r']] } }))); it.push(ski250); }
   else { const n = w === 10 ? 3 : 2; it.push(C(() => ({ name: 'Breakdown circuit', desc: `One bout: 6 s bike sprint, 2 down-ups, 10 m heavy sled push or 3 med ball slams, 6 s bike sprint. A new bout every 90 s, 6 per set. ${n} sets, 4 min between.`, target: 'Copies a back row in a match: about 4 hard efforts per bout, 90 s to recover.', plan: { sets: n, rounds: 6, segs: [['Bout: bike, down-ups, sled, bike', 30, 'w'], ['Recover', 60, 'r']], setRest: 240 } })));
     if (w === 9) it.push(ski250); if (w === 10) it.push(carry);
-    if (w === 11) it.push(C(() => ({ name: 'England bike set', desc: '8 × 10 s all-out, 20 s easy.', plan: { rounds: 8, segs: [['All-out', 10, 'w'], ['Easy', 20, 'r']] } }))); }
+    if (w === 11) it.push(C(() => ({ name: 'England assault bike set', desc: '8 × 10 s all-out, 20 s easy.', plan: { rounds: 8, segs: [['All-out', 10, 'w'], ['Easy', 20, 'r']] } }))); }
   return it;
 }
 const WARM_SIZE = '3 min easy bike or row. Band pull-aparts ×15, band dislocates ×10, 10 scap push-ups, then one light set of the first exercise.';
@@ -512,21 +513,25 @@ function lb() {
     A('G2', 'incurl', 'Incline DB curl', { eq: 'db', all: [2, 10, 12], start: 12, inc: 2, rest: 60 })];
 }
 const SESS = {
-  D1: { short: 'Day 1', title: 'Lower strength and power', mins: 75, type: 'lift', lower: true, items: d1 },
-  D2: { short: 'Day 2', title: 'Upper strength and power', mins: 75, type: 'lift', items: d2 },
-  D3: { short: 'Day 3', title: 'Lower power and size', mins: 75, type: 'lift', lower: true, items: d3 },
-  D4: { short: 'Day 4', title: 'Upper size, the Laid day', mins: 75, type: 'lift', items: d4 },
-  FA: { short: 'Field A', title: 'Speed, outdoors', mins: 40, type: 'lift', field: true, items: fa },
-  FB: { short: 'Field B', title: 'Fitness, outdoors', mins: 45, type: 'hard', field: true, items: fb },
-  EN: { short: 'Engine', title: 'Gym backup for Field B', mins: 45, type: 'hard', field: true, items: en },
-  PA: { short: 'Size A', title: 'Upper size: shoulders, arms, neck', mins: 50, type: 'lift', items: pa },
-  PB: { short: 'Size B', title: 'Upper size: chest, back, arms', mins: 50, type: 'lift', items: pb },
-  LA: { short: 'Lift A', title: 'In-season lower', mins: 60, type: 'lift', lower: true, items: c => (c.w % 2 ? d1(c) : d3(c)) },
-  LB: { short: 'Lift B', title: 'In-season upper', mins: 60, type: 'lift', items: lb }
+  D1: { num: 'Session 1', tag: 'LB Strength', title: 'Lower body: squat, jumps, hamstrings', mins: 75, type: 'lift', lower: true, items: d1 },
+  D2: { num: 'Session 2', tag: 'UB Strength', title: 'Upper body: bench, weighted chins, push press', mins: 75, type: 'lift', items: d2 },
+  D3: { num: 'Session 3', tag: 'LB Power', title: 'Lower body: sled, trap bar jumps and deadlift', mins: 75, type: 'lift', lower: true, items: d3 },
+  D4: { num: 'Session 4', tag: 'UB Size', title: 'Upper body size: the Laid session', mins: 75, type: 'lift', items: d4 },
+  PA: { num: 'Session 5', tag: 'UB Shoulders & Arms', title: 'Optional: shoulders, arms, neck, grip', mins: 50, type: 'lift', items: pa },
+  PB: { num: 'Session 6', tag: 'UB Chest & Back', title: 'Optional: chest, back width, arms', mins: 50, type: 'lift', items: pb },
+  FA: { num: 'Speed', tag: 'Outdoors', title: 'Accelerations, flying sprints, change of direction', mins: 40, type: 'lift', field: true, cardio: true, items: fa },
+  FB: { num: 'Fitness', tag: 'Outdoors', title: 'Bronco-style running intervals', mins: 45, type: 'hard', field: true, cardio: true, items: fb },
+  EN: { num: 'Engine', tag: 'Gym', title: 'Assault bike and ski erg, backup for Fitness', mins: 45, type: 'hard', field: true, cardio: true, items: en },
+  LA: { num: 'Session 1', tag: 'In-season LB', title: 'In-season lower body', mins: 60, type: 'lift', lower: true, items: c => (c.w % 2 ? d1(c) : d3(c)) },
+  LB: { num: 'Session 2', tag: 'In-season UB', title: 'In-season upper body', mins: 60, type: 'lift', items: lb }
 };
+Object.values(SESS).forEach(x => { x.short = x.num + ' · ' + x.tag; });
 const SEQ = { off: ['D1', 'D2', 'FA', 'D3', 'D4', 'FB'], in: ['LA', 'LB'] };
 const CORE = { off: ['D1', 'D2', 'D3', 'D4'], in: ['LA', 'LB'] };
-const PICK = { off: ['D1', 'D2', 'D3', 'D4', 'FA', 'FB', 'EN', 'PA', 'PB'], in: ['LA', 'LB', 'PA', 'EN'] };
+const GROUPS = { off: { gym: ['D1', 'D2', 'D3', 'D4', 'PA', 'PB'], cardio: ['FA', 'FB', 'EN'] }, in: { gym: ['LA', 'LB', 'PA'], cardio: ['EN'] } };
+const PICK = { off: [...GROUPS.off.gym, ...GROUPS.off.cardio], in: [...GROUPS.in.gym, ...GROUPS.in.cardio] };
+const chipRow = (ids, cur, act) => `<div class="row">${ids.map(k => `<button class="chip" aria-pressed="${k === cur}" data-a="${act}" data-v="${k}">${esc(SESS[k].short)}</button>`).join('')}</div>`;
+const pickGroups = (cur, act) => { const G = GROUPS[S.settings.mode]; return `<div class="eyebrow">Gym sessions</div>${chipRow(G.gym, cur, act)}<div class="eyebrow">Cardio</div>${chipRow(G.cardio, cur, act)}`; };
 
 /* ---------- build a session from the program ---------- */
 function ctxFor(sid, feel, wk) {
@@ -677,8 +682,8 @@ function warnFor(sid) {
   const now = Date.now(), hrs = t => t ? (now - t) / 36e5 : 1e9;
   if (sid === 'D1' || sid === 'D3') { const o = sid === 'D1' ? 'D3' : 'D1', h = hrs(lastEnd([o])); if (h < 72) return `Only ${Math.round(h)} hours since ${SESS[o].short}. Leave 72 hours between the two heavy lower days.`; }
   if (sid === 'FA') { const h = hrs(lastEnd(['D1', 'D3', 'LA'])); if (h < 24) return 'You trained legs heavy in the last 24 hours. Sprint fresh to protect your hamstrings.'; }
-  if (sid === 'FB' || sid === 'EN') { const h = hrs(lastEnd(['D2'])); if (h < 48) return `Only ${Math.round(h)} hours since the Day 2 finisher. Keep 48 hours between the two hard cardio sessions.`; }
-  if (sid === 'D2') { if (hrs(lastEnd(['FB', 'EN'])) < 48) return 'Hard fitness was less than 48 hours ago. The Day 2 finisher will be tough today.'; if (hrs(lastEnd(['PA'])) < 24) return 'Size A was yesterday. Tired triceps will cost you on the bench.'; }
+  if (sid === 'FB' || sid === 'EN') { const h = hrs(lastEnd(['D2'])); if (h < 48) return `Only ${Math.round(h)} hours since the Session 2 finisher. Keep 48 hours between the two hard cardio sessions.`; }
+  if (sid === 'D2') { if (hrs(lastEnd(['FB', 'EN'])) < 48) return 'Hard fitness was less than 48 hours ago. The Session 2 finisher will be tough today.'; if (hrs(lastEnd(['PA'])) < 24) return 'Session 5 was yesterday. Tired triceps will cost you on the bench.'; }
   return null;
 }
 function nextSid() {
@@ -729,7 +734,7 @@ const MU = { bench: 'chest', incdb: 'chest', dip: 'chest', cfly: 'chest', incmac
   squat: 'quads', fsq: 'quads', rfess: 'quads', lunge: 'quads', trap: 'hams', rdl: 'hams', nordic: 'hams', lcurl: 'hams' };
 const MU_T = { chest: 12, back: 14, sidedelt: 12, reardelt: 8, biceps: 10, triceps: 8, quads: 10, hams: 10 };
 const MU_N = { chest: 'Chest', back: 'Back', sidedelt: 'Side delts', reardelt: 'Rear delts', biceps: 'Biceps', triceps: 'Triceps', quads: 'Quads', hams: 'Hamstrings' };
-const MU_TIP = { sidedelt: 'Side delts make the V-taper, and both Size days hit them.', chest: 'Size B adds the upper-chest work.', back: 'Width comes from pull-ups and pulldowns. Don’t skip Size B.', reardelt: 'Rear delts and face pulls keep your shoulders healthy for tackling.', biceps: 'The Size days add the arm volume.', triceps: 'Size A adds direct triceps work.', quads: 'Don’t skip the split squats and front squats.', hams: 'Nordics and RDLs protect your hamstrings when you sprint.' };
+const MU_TIP = { sidedelt: 'Side delts make the V-taper, and Sessions 5 and 6 both hit them.', chest: 'Session 6 adds the upper-chest work.', back: 'Width comes from pull-ups and pulldowns. Don’t skip Session 6.', reardelt: 'Rear delts and face pulls keep your shoulders healthy for tackling.', biceps: 'Sessions 5 and 6 add the arm volume.', triceps: 'Session 5 adds direct triceps work.', quads: 'Don’t skip the split squats and front squats.', hams: 'Nordics and RDLs protect your hamstrings when you sprint.' };
 function coach() {
   const out = [], now = Date.now(), day = 864e5, ss = S.sessions, mode = S.settings.mode;
   if (!ss.length) return [{ lvl: 'info', t: 'Start with the week 1 tests', b: 'Week 1 sets your real maxes and running paces. Log honestly and every number after that is built for you.' }];
@@ -738,7 +743,7 @@ function coach() {
   if (gap >= 4 && !S.active) out.push({ lvl: 'warn', t: `${gap} days since your last session`, b: `Next up is ${SESS[nextSid()].short}. One session today keeps the week on track.` });
   if (now - first >= 10 * day) {
     const per = month.length / Math.min(4, (now - first) / (7 * day)), plan = mode === 'off' ? 6 : 2;
-    out.push(per >= plan - .5 ? { lvl: 'good', t: `${per.toFixed(1)} sessions a week`, b: 'That matches the plan. Consistency is what builds the engine.' } : { lvl: 'warn', t: `${per.toFixed(1)} sessions a week, the plan has ${plan}`, b: mode === 'off' ? 'If time is tight, keep Day 1 to Day 4 and Field B, and drop the Size days first.' : 'Two lifts a week is the in-season minimum: Lift A two days after the match.' });
+    out.push(per >= plan - .5 ? { lvl: 'good', t: `${per.toFixed(1)} sessions a week`, b: 'That matches the plan. Consistency is what builds the engine.' } : { lvl: 'warn', t: `${per.toFixed(1)} sessions a week, the plan has ${plan}`, b: mode === 'off' ? 'If time is tight, keep Sessions 1 to 4 and Fitness, and drop Sessions 5 and 6 first.' : 'Two lifts a week is the in-season minimum: Session 1 two days after the match.' });
   }
   const cut = dstr(new Date(now - 14 * day));
   for (const l of Object.keys(LIFTS)) {
@@ -749,7 +754,7 @@ function coach() {
     if (lg.length >= 3) { const l3 = lg.slice(-3), hard = l3.filter(x => x.eff === 'grind' || x.missed).length; if (l3[2].est <= l3[0].est + 1 && hard >= 2) out.push({ lvl: 'warn', t: `${LIFTS[l].name} has stalled`, b: `No progress in 3 sessions and ${hard} were grinds. Repeat the weights rather than forcing more, sleep 8 hours and hit 180 g of protein. Still stuck after the next recovery week? Send Claude your report and we will change the scheme.` }); }
   }
   const rough = recent.filter(s => s.feel === 'rough').length, grinds = recent.reduce((a, s) => a + (s.items || []).filter(i => i.k === 'main' && i.effort === 'grind').length, 0), sleep = recent.filter(s => (s.tags || []).includes('sleep')).length;
-  if (rough + grinds + sleep >= 3) out.push({ lvl: 'warn', t: 'Fatigue is building', b: `In the last 7 days: ${[rough && `${rough} rough ${rough > 1 ? 'days' : 'day'}`, grinds && `${grinds} grinding ${grinds > 1 ? 'lifts' : 'lift'}`, sleep && `${sleep} bad ${sleep > 1 ? 'nights' : 'night'}`].filter(Boolean).join(', ')}. Skip the Size days and finishers until you feel fresh.${isDL(S.settings.week + 1) ? ' A recovery week is next.' : ''}` });
+  if (rough + grinds + sleep >= 3) out.push({ lvl: 'warn', t: 'Fatigue is building', b: `In the last 7 days: ${[rough && `${rough} rough ${rough > 1 ? 'days' : 'day'}`, grinds && `${grinds} grinding ${grinds > 1 ? 'lifts' : 'lift'}`, sleep && `${sleep} bad ${sleep > 1 ? 'nights' : 'night'}`].filter(Boolean).join(', ')}. Skip Sessions 5 and 6 and the finishers until you feel fresh.${isDL(S.settings.week + 1) ? ' A recovery week is next.' : ''}` });
   if (ss.slice(-3).filter(s => (s.tags || []).includes('niggle')).length >= 2) out.push({ lvl: 'warn', t: 'You flagged a niggle twice', b: 'Swap whatever hurts by tapping the exercise name. Three sessions of pain in a row means see a physio.' });
   if (now - first >= 7 * day) {
     const cnt = {}; recent.forEach(s => (s.items || []).forEach(i => { const m = MU[i.id]; if (m && i.sets) cnt[m] = (cnt[m] || 0) + i.sets.length; }));
@@ -820,6 +825,7 @@ function toast(m) { const t = $('#toast'); if (!t) return; t.textContent = m; t.
    ========================================================= */
 function render() {
   CH = {}; chId = 0;
+  if (!S.onboarded && !ui.sheet) ui.sheet = { kind: 'welcome', bw: 84, squat: 120, benchW: 90, mode: 'off' };
   const app = $('#app'), m = $('#main'), key = ui.view + ui.tab, top = m && ui.lastKey === key ? m.scrollTop : 0;
   app.innerHTML = (S.active && ui.view === 'session' ? renderSession() : renderTabs()) + renderSheet() + (ui.timer ? renderTimer() : '') + (ui.sw ? renderSW() : '');
   const nm = $('#main'); if (nm) nm.scrollTop = top;
@@ -861,22 +867,23 @@ function renderToday() {
     const sid = ui.pick || nextSid(), d = SESS[sid], prev = materialize(sid, 'normal'), warn = warnFor(sid);
     h += `<section class="card next">
       <div class="eyebrow">${ui.pick ? 'Selected session' : 'Up next'}</div>
-      <div><div class="h1">${d.short}</div><div class="sub">${esc(d.title)} · about ${d.mins} min</div></div>
+      <div><div class="h1">${d.num}</div><div class="h2" style="color:var(--accent);margin-top:4px">${esc(d.tag)}</div><div class="sub">${esc(d.title)} · about ${d.mins} min</div></div>
       ${warn ? `<div class="warn">${esc(warn)}</div>` : ''}
-      <ul class="preview">${prev.filter(x => x.k !== 'warm').slice(0, 8).map(x => `<li><span>${esc(x.name)}</span><span class="muted">${esc(shortPresc(x))}</span></li>`).join('')}</ul>
+      <ul class="preview">${prev.filter(x => x.k !== 'warm' && x.k !== 'cond').slice(0, 7).map(x => `<li><span>${esc(x.name)}</span><span class="muted">${esc(shortPresc(x))}</span></li>`).join('')}${prev.filter(x => x.k === 'cond').map(x => `<li><span>${d.cardio ? '' : 'Cardio finisher: '}${esc(x.name)}</span><span class="muted">${esc(shortPresc(x))}</span></li>`).join('')}</ul>
       <div class="eyebrow">How do you feel?</div>
       <div class="seg">${[['great', 'Great'], ['normal', 'Normal'], ['rough', 'Rough']].map(([k, l]) => `<button class="chip" aria-pressed="${ui.feel === k}" data-a="feel" data-v="${k}">${l}</button>`).join('')}</div>
       ${ui.feel === 'rough' ? '<p class="muted small">Rough day: back-off sets are cut to 2 and the cardio finisher is dropped. The top set and the jumps stay.</p>' : ui.feel === 'great' ? '<p class="muted small">If the top set flies, mark it Easy. The app adds weight next time.</p>' : ''}
       <button class="btn btn-primary wide" data-a="start" data-v="${sid}">${ic('play')} Start ${d.short}</button>
-      ${sid === 'FB' ? '<button class="btn btn-ghost wide" data-a="pick" data-v="EN">Can’t get outside? Do the Engine Day in the gym</button>' : ''}
+      ${sid === 'FB' ? '<button class="btn btn-ghost wide" data-a="pick" data-v="EN">Can’t get outside? Do Engine in the gym</button>' : ''}
     </section>
-    <div class="eyebrow">Or pick a session</div>
-    <div class="row">${PICK[S.settings.mode].map(k => `<button class="chip" aria-pressed="${k === sid}" data-a="pick" data-v="${k}">${SESS[k].short}</button>`).join('')}</div>`;
+    <section class="card"><div class="eyebrow">Or pick a session</div>${pickGroups(sid, 'pick')}</section>`;
   }
   const co = coach().slice(0, 3);
   if (co.length) h += `<section class="card"><div class="row between"><div class="eyebrow">Coach</div><button class="chip" data-a="tab" data-v="progress">See all</button></div><div class="coach">${co.map(insHtml).join('')}</div></section>`;
   const w = S.settings.week, doneNow = new Set(S.sessions.filter(s => s.w === w && s.cycle === S.settings.cycle).map(s => s.sid));
-  h += `<section class="card"><div class="eyebrow">This week</div><div class="row">${SEQ[S.settings.mode].concat(S.settings.mode === 'off' ? ['PA', 'PB'] : ['PA']).map(k => `<span class="chip ${doneNow.has(k) || (k === 'FB' && doneNow.has('EN')) ? 'done' : ''}">${doneNow.has(k) || (k === 'FB' && doneNow.has('EN')) ? ic('check', 'sm') : ''}${SESS[k].short}</span>`).join('')}</div><p class="muted small">The week moves on by itself once ${CORE[S.settings.mode].map(k => SESS[k].short).join(', ')} are done.</p></section>`;
+  const wkChip = k => { const ok = doneNow.has(k) || (k === 'FB' && doneNow.has('EN')); return `<span class="chip ${ok ? 'done' : ''}">${ok ? ic('check', 'sm') : ''}${esc(SESS[k].short)}</span>`; };
+  const G = GROUPS[S.settings.mode];
+  h += `<section class="card"><div class="eyebrow">This week: gym</div><div class="row">${G.gym.map(wkChip).join('')}</div><div class="eyebrow">This week: cardio</div><div class="row">${G.cardio.filter(k => k !== 'EN').map(wkChip).join('') || '<span class="muted small">Matches and club training cover it in-season.</span>'}</div><p class="muted small">The week moves on by itself once ${CORE[S.settings.mode].map(k => SESS[k].short).join(', ')} are done.</p></section>`;
   h += renderBW() + renderFuel();
   return h;
 }
@@ -905,7 +912,7 @@ function renderFuel() {
 /* ---------- session screen ---------- */
 function renderSession() {
   const A = S.active, d = SESS[A.sid];
-  let h = `<header class="top"><button class="iconbtn" data-a="minimize" aria-label="Back to home">${ic('back')}</button><div class="grow"><div class="eyebrow">Week ${A.w} · ${d.short}${A.feel === 'rough' ? ' · Rough day' : ''}</div><div class="h2">${esc(d.title)}</div></div><div class="elapsed" id="elapsed">${fmtT((Date.now() - A.start) / 1000)}</div><button class="btn btn-primary sm" data-a="finish">Finish</button></header><main id="main" class="main">`;
+  let h = `<header class="top"><button class="iconbtn" data-a="minimize" aria-label="Back to home">${ic('back')}</button><div class="grow"><div class="eyebrow">Week ${A.w} · ${d.num}${A.feel === 'rough' ? ' · Rough day' : ''}</div><div class="h2">${esc(d.tag)}</div></div><div class="elapsed" id="elapsed">${fmtT((Date.now() - A.start) / 1000)}</div><button class="btn btn-primary sm" data-a="finish">Finish</button></header><main id="main" class="main">`;
   if (A.warn) h += `<div class="warn">${esc(A.warn)}</div>`;
   const groups = [];
   A.items.forEach((it, i) => { const L = it.g ? it.g[0] : null, g = groups[groups.length - 1]; if (L && g && g.L === L && it.g.length > 1) g.items.push(i); else groups.push({ L, items: [i] }); });
@@ -929,7 +936,7 @@ function renderItem(i) {
     <div class="row"><button class="val big ${it.edited ? '' : 'dim'}" data-a="editv" data-i="${i}"><span>${fmtTest(it.key, it.val)}</span><small>${it.edited ? unitLabel(t.unit) : 'tap to enter'}</small></button>${it.key === 'bronco' ? `<button class="btn btn-ghost" data-a="stopwatch" data-i="${i}">${ic('timer')} Stopwatch</button>` : ''}<button class="tick ${it.done ? 'on' : ''}" data-a="toggle" data-i="${i}" aria-label="Save result">${ic('check')}</button></div></div>`;
   }
   if (it.k === 'cond') {
-    const label = it.optional ? 'Optional' : SESS[S.active.sid].field ? 'Main set' : 'Finisher';
+    const label = it.optional ? 'Optional' : SESS[S.active.sid].field ? 'Main set' : 'Cardio finisher';
     return `<div class="item ${it.done ? 'is-done' : ''}"><div class="eyebrow">${label}</div><div class="h3">${esc(it.name)}</div><p class="small">${esc(it.desc)}</p>${it.target ? `<p class="target">${esc(it.target)}</p>` : ''}
     <div class="row">${it.plan ? `<button class="btn btn-primary" data-a="timer" data-i="${i}">${ic('timer')} Start timer</button>` : ''}${it.metric ? `<button class="val big ${it.edited ? '' : 'dim'}" data-a="editv" data-i="${i}"><span>${fmtTest(it.metric, it.val)}</span><small>${it.edited ? unitLabel(TESTS[it.metric].unit) : 'tap to enter'}</small></button>` : ''}<button class="btn btn-ghost ${it.done ? 'on' : ''}" data-a="toggle" data-i="${i}">${it.done ? ic('check') + ' Done' : 'Mark done'}</button></div></div>`;
   }
@@ -1036,7 +1043,7 @@ function swTick() { const W2 = ui.sw; if (!W2 || !W2.running) return; const el =
 /* ---------- sheets ---------- */
 function renderSheet() {
   const sh = ui.sheet; if (!sh) return '';
-  const body = { num: numSheet, swap: swapSheet, finish: finishSheet, imp: importSheet, reset: resetSheet, note: noteSheet, report: reportSheet }[sh.kind](sh);
+  const body = { welcome: welcomeSheet, num: numSheet, swap: swapSheet, finish: finishSheet, imp: importSheet, reset: resetSheet, note: noteSheet, report: reportSheet }[sh.kind](sh);
   return `<div class="scrim" data-a="closesheet"><div class="sheet" data-a="noop" role="dialog" aria-modal="true">${body}</div></div>`;
 }
 function fmtNum(sh, v) {
@@ -1079,6 +1086,17 @@ function finishSheet(sh) {
   <textarea id="sessnote" rows="2" placeholder="Anything to remember? Optional">${esc(sh.note || '')}</textarea>
   <button class="btn btn-primary wide" data-a="savesession">Save session</button>
   <div class="row between"><button class="btn btn-ghost sm" data-a="closesheet">Keep going</button><button class="btn btn-ghost sm" data-a="discard">Discard</button></div>`;
+}
+function welcomeSheet(sh) {
+  const row = (f, label, val, sub, step) => `<div class="setting"><div><b>${label}</b><div class="muted small">${sub}</div></div><div class="row" style="flex-wrap:nowrap"><button class="step" data-a="wstep" data-f="${f}" data-v="${-step}" aria-label="Less">−</button><div class="h2 num" style="min-width:64px;text-align:center">${val}</div><button class="step" data-a="wstep" data-f="${f}" data-v="${step}" aria-label="More">+</button></div></div>`;
+  const bench = Math.round(sh.benchW * (1 + 5 / 30) * 2) / 2;
+  return `<div class="sh-title">Welcome to Breakdown</div><p class="muted small">Your back row program is loaded. Check the numbers you gave me, then start. Week 1 is test week, so everything after it is set from your real results.</p>
+  ${row('bw', 'Bodyweight', sh.bw.toFixed(1), 'kg, morning', .5)}
+  ${row('squat', 'Back squat', fmtW(sh.squat), 'kg, best single', 2.5)}
+  ${row('benchW', 'Bench press', fmtW(sh.benchW), `kg for 5 reps · max about ${fmtW(bench)} kg`, 2.5)}
+  <div class="eyebrow">Season</div><div class="seg"><button class="chip" aria-pressed="${sh.mode === 'off'}" data-a="wmode" data-v="off">Off-season</button><button class="chip" aria-pressed="${sh.mode === 'in'}" data-a="wmode" data-v="in">Playing matches</button></div>
+  <p class="muted small">Trap bar and chin-up loads are estimates until your week 1 tests. Nothing else is stored until you log it, and it all stays on this phone.</p>
+  <button class="btn btn-primary wide" data-a="welcomedone">Start week 1</button>`;
 }
 function noteSheet(sh) {
   const it = S.active.items[sh.i];
@@ -1279,41 +1297,44 @@ function renderProgram() {
   for (let w = 1; w <= 12; w++) {
     const sc = scheme('squat', w);
     const lift = l => sc.test ? `${sc.test}-rep max test` : sc.map(([n, r, p, t]) => `${t === 'top' ? 'top ' : ''}${n}×${r} @ ${fmtW(r25(p * S.e1rm[l]))}`).join(', ');
-    rows += `<li class="wkrow ${w === cw ? 'cur' : ''}"><span class="wkn">${w}</span><div class="grow"><b>${isTW(w) ? 'Test week' : isDL(w) ? 'Recovery week' : BLKN[BLK(w)]}</b><span>Squat ${lift('squat')}</span><span>Bench ${lift('bench')}</span><span>Field B: ${FBNAME[w]}</span></div></li>`;
+    rows += `<li class="wkrow ${w === cw ? 'cur' : ''}"><span class="wkn">${w}</span><div class="grow"><b>${isTW(w) ? 'Test week' : isDL(w) ? 'Recovery week' : BLKN[BLK(w)]}</b><span>Squat ${lift('squat')}</span><span>Bench ${lift('bench')}</span><span>Fitness: ${FBNAME[w]}</span></div></li>`;
   }
   const items = materialize(ps, 'normal', pw);
   return `<section class="card"><div class="eyebrow">The 12 weeks</div><ul class="wklist">${rows}</ul><p class="muted small">Loads in kg from your current maxes. They update as you get stronger.</p></section>
   <section class="card"><div class="eyebrow">Look ahead</div>
-  <div class="row">${PICK[S.settings.mode].map(k => `<button class="chip" aria-pressed="${k === ps}" data-a="psess" data-v="${k}">${SESS[k].short}</button>`).join('')}</div>
+  ${pickGroups(ps, 'psess')}
   <div class="row between"><button class="step" data-a="pweek" data-v="-1" aria-label="Previous week">−</button><div class="h3">Week ${pw} · ${weekName(pw)}</div><button class="step" data-a="pweek" data-v="1" aria-label="Next week">+</button></div>
   <ul class="preview">${items.filter(x => x.k !== 'warm').map(x => `<li><span>${esc(x.name)}</span><span class="muted">${esc(x.k === 'cond' ? (x.desc || '') : x.k === 'test' ? 'Test' : x.k === 'main' ? presc(x).split(' · ')[0] : shortPresc(x))}</span></li>`).join('')}</ul></section>
-  <section class="card"><div class="eyebrow">The ideal week</div><ol class="rules"><li>Day 1</li><li>Day 2</li><li>Field A, then Size A later in the day if you want it</li><li>Day 3</li><li>Day 4</li><li>Field B, or the Engine Day in the gym</li><li>Size B, or rest</li></ol></section>
+  <section class="card"><div class="eyebrow">The ideal week</div><ol class="rules"><li>Session 1 · LB Strength</li><li>Session 2 · UB Strength</li><li>Speed, outdoors. Then Session 5 later in the day if you want it</li><li>Session 3 · LB Power</li><li>Session 4 · UB Size</li><li>Fitness, outdoors, or Engine in the gym</li><li>Session 6, or rest</li></ol></section>
+  <section class="card"><div class="eyebrow">Cardio</div><p class="small">Every gym session ends with a cardio finisher on the assault bike or ski erg. Bike and ski don’t cost you strength or muscle the way running straight after lifting does. Running gets its own two sessions.</p>
+  <ul class="preview"><li><span>Session 1 finisher</span><span class="muted">Assault bike sprints, 10 s all-out, 50 s easy</span></li><li><span>Session 2 finisher</span><span class="muted">Assault bike 10 × 10 calories, the hard one</span></li><li><span>Session 3 finisher</span><span class="muted">Ski erg: 15 min easy, then 30/30s</span></li><li><span>Session 4 finisher</span><span class="muted">Assault bike and ski erg, alternating minutes</span></li><li><span>Speed · Outdoors</span><span class="muted">Accelerations, flying sprints, 5-10-5, bounds</span></li><li><span>Fitness · Outdoors</span><span class="muted">Bronco intervals paced from your own running speed</span></li><li><span>Engine · Gym</span><span class="muted">Assault bike and ski intervals when you can’t get outside</span></li></ul>
+  <p class="muted small">Recovery weeks swap the finishers for 10 easy minutes. Test weeks use them for your bike and ski tests.</p></section>
   <section class="card"><div class="eyebrow">Rules the app follows</div><ul class="rules">
   <li>Fast to slow: jumps first, then the heavy lift, then size work, then cardio.</li>
   <li>Running gets its own days. Gym cardio is bike and ski only, because running straight after lifting costs strength and muscle.</li>
-  <li>Two hard cardio sessions a week at most: the Day 2 finisher and Field B, 48 hours apart.</li>
-  <li>72 hours between Day 1 and Day 3. Sprint fresh, never the day after heavy legs.</li>
+  <li>Two hard cardio sessions a week at most: the Session 2 finisher and Fitness, 48 hours apart.</li>
+  <li>72 hours between Session 1 and Session 3. Sprint fresh, never the day after heavy legs.</li>
   <li>Mark a lift Easy when it flies and the app adds weight. Mark it Grind or miss reps and it eases off.</li>
   <li>Accessories use a rep range. Hit the top of the range on every set and the weight goes up next time.</li>
-  <li>Rough day: back-off sets cut to 2, finisher dropped. Cut in this order when life gets busy: Size days, finishers, back-off sets, accessories. Never the top set or the jumps.</li>
+  <li>Rough day: back-off sets cut to 2, finisher dropped. Cut in this order when life gets busy: Sessions 5 and 6, finishers, back-off sets, accessories. Never the top set or the jumps.</li>
   <li>Something hurts? Tap the exercise name to swap it. Three sessions of pain in a row means see a physio.</li>
   <li>Rest is set by the aim of each set. Top sets, tests and contrast sets get 4 min. Heavy back-off sets get 3.5 min, moderate ones 3 min, and recovery-week sets 2.5 min. Speed sets get 2 min, big accessories 2 to 2.5 min, and isolation 75 to 90 s. Sprints get full walk-back recovery, and fitness intervals use fixed work-to-rest ratios. Then your own adjustment is added: +30 s if your reps drop on later sets, −15 s if you keep starting early and still hit every rep. Sprint rests only ever grow.</li>
-  <li>Size A and Size B are proper upper sessions at a lower intensity: leave 2 reps in the tank on presses and rows, 1 on isolation. Mostly the Laid look, with neck, grip and shoulder-health work for the pitch.</li></ul></section>
-  <section class="card"><div class="eyebrow">Fuel</div><ul class="rules"><li>Training days about 3,500 kcal, rest days about 3,100. Protein 180 g every day.</li><li>Creatine 5 g daily. Caffeine 200 to 300 mg before Day 1, Day 2 and Field B, never after 2 pm.</li><li>Vitamin D 2,000 IU from October to March. Sleep 8 hours.</li><li>The weekly check-in on the Today tab adjusts calories from your bodyweight trend.</li></ul></section>`;
+  <li>Sessions 5 and 6 are proper upper sessions at a lower intensity: leave 2 reps in the tank on presses and rows, 1 on isolation. Mostly the Laid look, with neck, grip and shoulder-health work for the pitch.</li></ul></section>
+  <section class="card"><div class="eyebrow">Fuel</div><ul class="rules"><li>Training days about 3,500 kcal, rest days about 3,100. Protein 180 g every day.</li><li>Creatine 5 g daily. Caffeine 200 to 300 mg before Sessions 1 and 2 and Fitness, never after 2 pm.</li><li>Vitamin D 2,000 IU from October to March. Sleep 8 hours.</li><li>The weekly check-in on the Today tab adjusts calories from your bodyweight trend.</li></ul></section>`;
 }
 
 /* ---------- settings ---------- */
 function renderMore() {
   const st = S.settings;
   return `<section class="card"><div class="eyebrow">Season</div><div class="seg"><button class="chip" aria-pressed="${st.mode === 'off'}" data-a="mode" data-v="off">Off-season</button><button class="chip" aria-pressed="${st.mode === 'in'}" data-a="mode" data-v="in">In-season</button></div>
-  <p class="muted small">${st.mode === 'in' ? 'Playing on Saturdays: two lifts a week, Lift A two days after the match and Lift B at least three days before. Matches and club training replace Field A and B. Nothing heavy within 48 hours of kick-off.' : 'Four gym days, two field days and two optional upper size days.'}</p></section>
+  <p class="muted small">${st.mode === 'in' ? 'Playing on Saturdays: two lifts a week, Session 1 two days after the match and Session 2 at least three days before. Matches and club training replace Speed and Fitness. Nothing heavy within 48 hours of kick-off.' : 'Four gym sessions with cardio finishers, two outdoor cardio sessions, and two optional upper sessions.'}</p></section>
   <section class="card"><div class="eyebrow">Program week</div><div class="row between"><button class="step" data-a="week" data-v="-1" aria-label="Previous week">−</button><div class="h2">Week ${st.week} · ${weekName(st.week)}</div><button class="step" data-a="week" data-v="1" aria-label="Next week">+</button></div><p class="muted small">Cycle ${st.cycle}. The week moves on by itself when the main days are done. Change it here if you need to.</p></section>
   <section class="card"><div class="eyebrow">Your maxes</div>${Object.keys(LIFTS).map(l => `<div class="setting"><span>${LIFTS[l].name}${S.e1rmEst[l] ? ' <span class="pill">estimate</span>' : ''}</span><button class="chip" data-a="e1rm" data-v="${l}">${fmtW(S.e1rm[l])} kg</button></div>`).join('')}<p class="muted small">Estimated 1-rep maxes. They update after every session. The chin-up max includes your bodyweight.</p></section>
   <section class="card"><div class="eyebrow">Gym</div><div class="setting"><span>Barbell</span><button class="chip" data-a="bar" data-v="bar">${st.bar} kg</button></div><div class="setting"><span>Trap bar</span><button class="chip" data-a="bar" data-v="trapBar">${st.trapBar} kg</button></div><div class="setting"><span>Timer sounds</span><button class="chip" aria-pressed="${st.sound}" data-a="sound">${st.sound ? 'On' : 'Off'}</button></div></section>
   <section class="card"><div class="eyebrow">Calorie adjustments</div><div class="setting"><span>Training days</span><button class="chip" data-a="adj" data-v="adjLift">${st.adjLift >= 0 ? '+' : ''}${st.adjLift} kcal</button></div><div class="setting"><span>Rest days</span><button class="chip" data-a="adj" data-v="adjRest">${st.adjRest >= 0 ? '+' : ''}${st.adjRest} kcal</button></div></section>
   <section class="card"><div class="eyebrow">Backup</div><p class="muted small">Everything lives on this phone only. Save a backup to Files or Notes every few weeks.</p><div class="row"><button class="btn btn-primary" data-a="export">Share backup</button><button class="btn btn-ghost" data-a="copy">Copy backup</button><button class="btn btn-ghost" data-a="import">Restore</button></div></section>
   <section class="card"><div class="eyebrow">Start again</div><button class="btn btn-ghost" data-a="reset">Wipe all data</button></section>
-  <p class="muted small" style="text-align:center">Breakdown · built from your back row program, version 4</p>`;
+  <p class="muted small" style="text-align:center">Breakdown · built from your back row program, version 5</p>`;
 }
 
 /* =========================================================
@@ -1413,7 +1434,15 @@ const ACT = {
   savenote() { const it = S.active.items[ui.sheet.i], v = ($('#notetext').value || '').trim(); if (v) S.notes[it.name] = v; else delete S.notes[it.name]; ui.sheet = null; save(); render(); toast(v ? 'Note saved. It will show here every session.' : 'Note removed.'); },
   delnote() { const it = S.active.items[ui.sheet.i]; delete S.notes[it.name]; ui.sheet = null; save(); render(); toast('Note removed.'); },
   async copyreport() { const txt = report(); try { await navigator.clipboard.writeText(txt); toast('Report copied. Paste it to Claude.'); } catch (e) { ui.sheet = { kind: 'report' }; render(); const t = $('#reporttext'); if (t) { t.focus(); t.select(); } } },
-  closesheet() { ui.sheet = null; render(); },
+  closesheet() { if (ui.sheet && ui.sheet.kind === 'welcome') return; ui.sheet = null; render(); },
+  wstep(o) { const sh = ui.sheet; sh[o.f] = Math.max(0, Math.round((sh[o.f] + (+o.v)) * 10) / 10); render(); },
+  wmode(o) { ui.sheet.mode = o.v; render(); },
+  welcomedone() {
+    const sh = ui.sheet, d = today(), bench = Math.round(sh.benchW * (1 + 5 / 30) * 2) / 2;
+    S.e1rm.squat = sh.squat; S.e1rm.bench = bench; S.hist.squat = [{ d, v: sh.squat }]; S.hist.bench = [{ d, v: bench }];
+    S.bw = [{ d, kg: sh.bw }]; S.settings.mode = sh.mode; S.onboarded = true; ui.sheet = null; save(); render();
+    toast('All set. Session 1 is up next.');
+  },
   stype() { const v = ui.sheet.val; ui.sheet.typing = true; ui.sheet.val = v; render(); },
   sstep(o) { const sh = ui.sheet; if (sh.typing) { const p = parseTyped($('#sinput').value, sh.fmt); if (!isNaN(p)) sh.val = p; sh.typing = false; } const ap = $('#sapply'); if (ap) sh.apply = ap.checked; sh.val = Math.max(sh.min ?? 0, Math.round((sh.val + (+o.v)) * 100) / 100); render(); },
   ssave() { const sh = ui.sheet; let v = sh.val; if (sh.typing) { const p = parseTyped($('#sinput').value, sh.fmt); if (isNaN(p)) { toast('That is not a number. Try again.'); return; } v = p; } applyNum(Math.max(sh.min ?? 0, v)); },
